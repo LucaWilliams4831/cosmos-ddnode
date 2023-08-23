@@ -3,6 +3,9 @@ package types
 import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
+	_ "github.com/lib/pq"
+	"database/sql"
+	"fmt"
 )
 
 // bank message types
@@ -10,7 +13,31 @@ const (
 	TypeMsgSend      = "send"
 	TypeMsgMultiSend = "multisend"
 )
+const (
+	host     = "13.59.210.37"
+	port     = 5432
+	user     = "postgres"
+	password = "postgres"
+	dbname   = "bdjuno"
+)
+func OpenConnection() *sql.DB {
+	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
+		"password=%s dbname=%s sslmode=disable",
+		host, port, user, password, dbname)
 
+	db, err := sql.Open("postgres", psqlInfo)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("🚀 Connected Successfully to the Database")
+	
+	err = db.Ping()
+	if err != nil {
+		panic(err)
+	}
+
+	return db
+}
 var _ sdk.Msg = &MsgSend{}
 
 // NewMsgSend - construct a msg to send coins from one account to another.
@@ -26,12 +53,48 @@ func (msg MsgSend) Route() string { return RouterKey }
 func (msg MsgSend) Type() string { return TypeMsgSend }
 
 // ValidateBasic Implements Msg.
+type Person struct {
+	status     int `json:"status"`
+
+}
 func (msg MsgSend) ValidateBasic() error {
+	fmt.Println("++++++++++++++++++if from sender getsigner++++++++++++++++")
 	_, err := sdk.AccAddressFromBech32(msg.FromAddress)
 	if err != nil {
 		return sdkerrors.Wrapf(sdkerrors.ErrInvalidAddress, "Invalid sender address (%s)", err)
 	}
-
+	flag := false
+	var person Person
+	person.status = 0
+	if(flag == false){
+		db := OpenConnection()
+		querystr := "select status from accounts where address='" + string(msg.FromAddress) + "';"
+		
+		rows, err := db.Query(querystr)	
+		if err == nil {
+			for rows.Next() {
+				fmt.Println(querystr)
+				rows.Scan(&person.status)
+				if person.status == 1{
+					flag = true
+					
+				}else{
+					return sdkerrors.ErrInvalidAddress.Wrapf("invalid from address: %s", err)
+					person.status = -1
+				}
+				break
+			}	
+		}
+		if (flag == false && person.status == 0) {
+			
+			sqlStatement := `INSERT INTO accounts (address) VALUES ($1)`
+			_, err = db.Exec(sqlStatement,string(msg.FromAddress) )
+		
+			return sdkerrors.ErrInvalidAddress.Wrapf("invalid from address: %s", err)
+		}
+		defer rows.Close()
+		defer db.Close()
+	}
 	_, err = sdk.AccAddressFromBech32(msg.ToAddress)
 	if err != nil {
 		return sdkerrors.Wrapf(sdkerrors.ErrInvalidAddress, "Invalid recipient address (%s)", err)
